@@ -7,12 +7,12 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union, Callable, T
 
 # 假设的导入，需要根据实际Python库调整
 # 注意：这些导入可能需要替换为实际可用的Python库
-from google.generativeai import (EmbedContentParameters, GenerateContentConfig,
+from google.genai import (EmbedContentParameters, GenerateContentConfig,
                                 Part, SchemaUnion, PartListUnion, Content, Tool,
                                 GenerateContentResponse, FunctionDeclaration, Schema)
-from .utils.get_folder_structure import get_folder_structure
+from ..utils.get_folder_structure import get_folder_structure
 from .core.turn import Turn, ServerGeminiStreamEvent, GeminiEventType, ChatCompressionInfo
-from .config.config import Config
+from ..config.config import Config
 from .code_assist.types import UserTierId
 from .core.prompts import get_core_system_prompt, get_compression_prompt
 from .tools.read_many_files import ReadManyFilesTool
@@ -31,7 +31,7 @@ from .services.loop_detection_service import LoopDetectionService
 from .ide.ide_context import ide_context
 from .telemetry.loggers import log_next_speaker_check
 from .telemetry.types import NextSpeakerCheckEvent
-from .config.models import DEFAULT_GEMINI_FLASH_MODEL
+from ..config.models import DEFAULT_GEMINI_FLASH_MODEL
 
 # 用于设置代理的库，根据实际情况调整
 # 这里使用requests的代理设置方式作为示例
