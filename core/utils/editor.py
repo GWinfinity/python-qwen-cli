@@ -127,4 +127,48 @@ def get_diff_command(
         ]
         return DiffCommand(command, args)
     elif editor == 'emacs':
-        return DiffCommand('emacs', ['--eval', f'(ediff 
+        return DiffCommand(command , ['--eval', f'(ediff "{oldPath}" "{newPath}")'])
+
+def open_diff(
+    old_path: str,
+    new_path: str,
+    editor: EditorType,
+) -> None:
+    diff_command = get_diff_command(old_path, new_path, editor)
+    if not diff_command:
+        print('No diff tool available. Install a supported editor.', file=sys.stderr)
+        return
+
+    try:
+        if editor in [EditorType.VSCODE, EditorType.VSCODIUM, EditorType.WINDSURF, EditorType.CURSOR, EditorType.ZED]:
+            # Use Popen for GUI-based editors to avoid blocking the entire process
+            process = subprocess.Popen(
+                [diff_command.command] + diff_command.args,
+                stdio='inherit',
+                shell=True
+            )
+            
+            # 等待进程完成
+            process.wait()
+            
+            if process.returncode != 0:
+                raise Exception(f"{editor.value} exited with code {process.returncode}")
+        elif editor in [EditorType.VIM, EditorType.EMACS, EditorType.NEOVIM]:
+            # Use subprocess.run for terminal-based editors
+            if platform.system() == 'Windows':
+                command = f"{diff_command.command} {' '.join(diff_command.args)}"
+            else:
+                command = f"{diff_command.command} {' '.join([f'\"{arg}\"' for arg in diff_command.args])}"
+            
+            # 使用run方法并等待完成
+            subprocess.run(
+                command,
+                shell=True,
+                check=True,
+                stdio='inherit',
+                text=True
+            )
+        else:
+            raise Exception(f"Unsupported editor: {editor.value}")
+    except Exception as error:
+        print(f"Error: {error}", file=sys.stderr)
