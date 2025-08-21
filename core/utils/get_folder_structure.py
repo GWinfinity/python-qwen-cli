@@ -1,7 +1,6 @@
 import asyncio
 import os
-import pathlib
-from typing import Optional, Set, List, Dict, Any, Union, Pattern, Callable
+from typing import Optional, Set, List, Dict, Any, Pattern
 
 # 常量定义
 MAX_ITEMS = 20
