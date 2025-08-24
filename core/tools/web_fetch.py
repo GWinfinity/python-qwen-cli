@@ -50,47 +50,6 @@ class WebFetchToolParams:
             grounding_mode=data.get('grounding_mode')
         )
 
-
-class WebFetchResult:
-    def __init__(
-        self,
-        url: str,
-        content: str,
-        content_type: str,
-        status_code: int,
-        headers: Dict[str, str],
-        metadata: Optional[Dict[str, Any]] = None,
-        cache_hit: Optional[bool] = None,
-        truncated: Optional[bool] = None,
-        word_count: Optional[int] = None,
-        token_count: Optional[int] = None,
-    ):
-        self.url = url
-        self.content = content
-        self.content_type = content_type
-        self.status_code = status_code
-        self.headers = headers
-        self.metadata = metadata
-        self.cache_hit = cache_hit
-        self.truncated = truncated
-        self.word_count = word_count
-        self.token_count = token_count
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'url': self.url,
-            'content': self.content,
-            'content_type': self.content_type,
-            'status_code': self.status_code,
-            'headers': self.headers,
-            'metadata': self.metadata,
-            'cache_hit': self.cache_hit,
-            'truncated': self.truncated,
-            'word_count': self.word_count,
-            'token_count': self.token_count,
-        }
-
-
 class WebFetchTool(BaseTool):
     def __init__(
         self,
