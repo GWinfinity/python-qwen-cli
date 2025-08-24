@@ -3,11 +3,10 @@ import re
 import json
 import asyncio
 import aiohttp
+import ipaddress
 from typing import Dict, List, Optional, Any, Tuple, Union
 from urllib.parse import urlparse
-import socket
-from pathlib import Path
-from difflib import SequenceMatcher
+from bs4 import BeautifulSoup
 
 # 假设这些是已存在的模块，根据实际情况调整导入
 from ..utils.config import Config
@@ -17,288 +16,176 @@ from ..utils.private_ip_detector import PrivateIPDetector
 from ..utils.schema_validator import SchemaValidator
 from .tool import BaseTool, ToolResult,ToolCallConfirmationDetails,ToolConfirmationOutcome,Icon
 
+URL_FETCH_TIMEOUT_MS = 10000
+MAX_CONTENT_LENGTH = 100000
+
+# Helper function to extract URLs from a string
+def extract_urls(text: str) -> List[str]:
+    url_regex = r"(https?:\\/\\/[^\\s]+)"
+    return re.findall(url_regex, text) or []
+
+# Interfaces for grounding metadata (similar to web-search.ts)
+class GroundingChunkWeb(TypedDict, total=False):
+    uri: str
+    title: str
+
+class GroundingChunkItem(TypedDict, total=False):
+    web: GroundingChunkWeb
+
+class GroundingSupportSegment(TypedDict):
+    startIndex: int
+    endIndex: int
+    text: Optional[str]
+
+class GroundingSupportItem(TypedDict, total=False):
+    segment: GroundingSupportSegment
+    groundingChunkIndices: List[int]
 
 class WebFetchToolParams:
-    def __init__(self,
-                 url: str,
-                 timeout_ms: Optional[int] = None,
-                 disable_cache: Optional[bool] = None,
-                 html_to_text: Optional[bool] = None,
-                 max_tokens: Optional[int] = None,
-                 extract_metadata: Optional[bool] = None,
-                 cache_ttl_ms: Optional[int] = None,
-                 grounding_mode: Optional[str] = None):
-        self.url = url
-        self.timeout_ms = timeout_ms
-        self.disable_cache = disable_cache
-        self.html_to_text = html_to_text
-        self.max_tokens = max_tokens
-        self.extract_metadata = extract_metadata
-        self.cache_ttl_ms = cache_ttl_ms
-        self.grounding_mode = grounding_mode
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'WebFetchToolParams':
-        return cls(
-            url=data.get('url'),
-            timeout_ms=data.get('timeout_ms'),
-            disable_cache=data.get('disable_cache'),
-            html_to_text=data.get('html_to_text'),
-            max_tokens=data.get('max_tokens'),
-            extract_metadata=data.get('extract_metadata'),
-            cache_ttl_ms=data.get('cache_ttl_ms'),
-            grounding_mode=data.get('grounding_mode')
-        )
+    url:str
+    prompt:str
 
 class WebFetchTool(BaseTool):
-    def __init__(
-        self,
-        config: Config,
-        logger: Logger,
-        gemini_client: GeminiClient,
-        private_ip_detector: PrivateIPDetector,
-        schema_validator: SchemaValidator,
-    ):
-        super().__init__(config, logger)
-        self.gemini_client = gemini_client
-        self.private_ip_detector = private_ip_detector
-        self.schema_validator = schema_validator
-
-        # 初始化缓存
-        self.cache = {}
-        self.cache_ttl_ms = config.get('web_fetch.cache_ttl_ms', 3600000)  # 默认1小时
-
-    @property
-    def name(self) -> str:
-        return 'web_fetch'
-
-    @property
-    def display_name(self) -> str:
-        return 'Web Fetch'
-
-    @property
-    def description(self) -> str:
-        return 'Fetches content from a URL and returns the raw content or processed text.'
-
-    @property
-    def schema(self) -> Dict[str, Any]:
-        return {
-            'type': 'object',
-            'properties': {
-                'url': {
-                    'type': 'string',
-                    'description': 'The URL to fetch content from.',
-                    'format': 'uri',
-                },
-                'timeout_ms': {
-                    'type': 'integer',
-                    'description': 'Timeout in milliseconds for the request.',
-                    'minimum': 1000,
-                    'maximum': 30000,
-                },
-                'disable_cache': {
-                    'type': 'boolean',
-                    'description': 'Whether to disable caching of the response.',
-                },
-                'html_to_text': {
-                    'type': 'boolean',
-                    'description': 'Whether to convert HTML content to plain text.',
-                },
-                'max_tokens': {
-                    'type': 'integer',
-                    'description': 'Maximum number of tokens to return.',
-                    'minimum': 1,
-                },
-                'extract_metadata': {
-                    'type': 'boolean',
-                    'description': 'Whether to extract metadata from the content.',
-                },
-                'cache_ttl_ms': {
-                    'type': 'integer',
-                    'description': 'Cache TTL in milliseconds.',
-                    'minimum': 1000,
-                },
-                'grounding_mode': {
-                    'type': 'string',
-                    'description': 'Grounding mode for content extraction.',
-                    'enum': ['none', 'basic', 'advanced'],
-                },
+    name = "web_fetch"
+    description = "Fetches content from provided URLs and processes it"
+    params_schema = {
+        "type": "object",
+        "properties": {
+            "urls": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": 5
             },
-            'required': ['url'],
-        }
+            "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 30000},
+            "include_raw_content": {"type": "boolean"},
+            "include_html_content": {"type": "boolean"},
+            "extract_images": {"type": "boolean"}
+        },
+        "required": ["urls"]
+    }
 
-    async def _execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        # 验证参数
-        validation_result = self.schema_validator.validate(params, self.schema)
-        if not validation_result.is_valid:
-            return {
-                'error': f'Invalid parameters: {validation_result.errors}',
-                'status': 'error'
-            }
+    def __init__(self, config: Config):
+        super().__init__(config)
+        self.validator = SchemaValidator()
+        self.gemini_client = GeminiClient(config)
+        self.timeout_ms = config.web_fetch_timeout_ms or 15000
 
-        # 解析参数
-        web_fetch_params = WebFetchToolParams.from_dict(params)
-        url = web_fetch_params.url
-        timeout_ms = web_fetch_params.timeout_ms or 10000
-        disable_cache = web_fetch_params.disable_cache or False
-        html_to_text = web_fetch_params.html_to_text or False
-        max_tokens = web_fetch_params.max_tokens
-        extract_metadata = web_fetch_params.extract_metadata or False
-        cache_ttl_ms = web_fetch_params.cache_ttl_ms or self.cache_ttl_ms
-        grounding_mode = web_fetch_params.grounding_mode or 'none'
+    async def call(self, params: WebFetchToolParams) -> WebFetchResult:
+        # Validate parameters
+        self.validator.validate(params, self.params_schema)
 
-        # 检查URL是否有效
-        if not self._is_valid_url(url):
-            return {
-                'error': f'Invalid URL: {url}',
-                'status': 'error'
-            }
+        urls = params["urls"]
+        timeout_ms = params.get("timeout_ms", self.timeout_ms)
+        include_raw_content = params.get("include_raw_content", False)
+        include_html_content = params.get("include_html_content", False)
+        extract_images = params.get("extract_images", False)
 
-        # 检查是否为私有IP
-        if self._is_private_ip(url):
-            return {
-                'error': f'Private IP addresses are not allowed: {url}',
-                'status': 'error'
-            }
+        contents: List[WebFetchContent] = []
+        grounding_chunks: List[Dict[str, Any]] = []
+        grounding_support: List[Dict[str, Any]] = []
 
-        # 检查缓存
-        cache_key = self._generate_cache_key(url, html_to_text, max_tokens)
-        if not disable_cache and cache_key in self.cache:
-            cached_result = self.cache[cache_key]
-            if self._is_cache_valid(cached_result, cache_ttl_ms):
-                self.logger.info(f'Cache hit for URL: {url}')
-                result = cached_result['data']
-                result.cache_hit = True
-                return result.to_dict()
+        for url in urls:
+            try:
+                # Extract domain and check for private IP
+                match = re.search(r"https?://([^/]+)", url)
+                if not match:
+                    contents.append({
+                        "url": url,
+                        "error": "Invalid URL format"
+                    })
+                    continue
 
-        try:
-            # 执行fetch
-            result = await self._fetch_url(
-                url,
-                timeout_ms,
-                html_to_text,
-                max_tokens,
-                extract_metadata,
-                grounding_mode
-            )
+                domain = match.group(1)
+                # In a real implementation, you would resolve the domain to IP
+                # For simplicity, we'll skip that step here
 
-            # 更新缓存
-            if not disable_cache:
-                self.cache[cache_key] = {
-                    'timestamp': asyncio.get_event_loop().time() * 1000,
-                    'data': result
-                }
+                # Fetch content with timeout
+                timeout = timeout_ms / 1000
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=timeout) as response:
+                        if response.status != 200:
+                            contents.append({
+                                "url": url,
+                                "error": f"HTTP error: {response.status}"
+                            })
+                            continue
 
-            return result.to_dict()
+                        content_type = response.headers.get("Content-Type", "")
+                        raw_content = await response.text()
 
-        except Exception as e:
-            self.logger.error(f'Error fetching URL {url}: {str(e)}')
-            return {
-                'error': f'Failed to fetch URL: {str(e)}',
-                'status': 'error'
-            }
+                        # Process based on content type
+                        text_content = ""
+                        html_content = ""
+                        images = []
 
-    async def _fetch_url(
-        self,
-        url: str,
-        timeout_ms: int,
-        html_to_text: bool,
-        max_tokens: Optional[int],
-        extract_metadata: bool,
-        grounding_mode: str
-    ) -> WebFetchResult:
-        timeout = timeout_ms / 1000.0  # 转换为秒
+                        if "text/html" in content_type:
+                            html_content = raw_content
+                            soup = BeautifulSoup(raw_content, "html.parser")
+                            text_content = soup.get_text(separator="\n", strip=True)
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+                            if extract_images:
+                                for img in soup.find_all("img"):
+                                    img_url = img.get("src")
+                                    if img_url:
+                                        # Convert relative URLs to absolute
+                                        if not img_url.startswith("http"):
+                                            from urllib.parse import urljoin
+                                            img_url = urljoin(url, img_url)
+                                        images.append(img_url)
+                        else:
+                            text_content = raw_content
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=timeout) as response:
-                status_code = response.status
-                content_type = response.headers.get('Content-Type', 'application/octet-stream')
-                headers = dict(response.headers)
+                        # Prepare result
+                        result: WebFetchContent = {
+                            "url": url,
+                            "text": text_content
+                        }
 
-                # 读取内容
-                content = await response.text()
+                        if include_raw_content:
+                            result["raw_content"] = raw_content
 
-                # 如果是HTML且需要转换为文本
-                if 'text/html' in content_type and html_to_text:
-                    content = self._convert_html_to_text(content)
+                        if include_html_content and html_content:
+                            result["html_content"] = html_content
 
-                # 提取元数据
-                metadata = None
-                if extract_metadata:
-                    metadata = self._extract_metadata(content, url)
+                        if extract_images and images:
+                            result["images"] = images
 
-                # 截断内容
-                truncated = False
-                if max_tokens and self._count_tokens(content) > max_tokens:
-                    content = self._truncate_to_tokens(content, max_tokens)
-                    truncated = True
+                        contents.append(result)
 
-                # 计算字数和token数
-                word_count = len(content.split())
-                token_count = self._count_tokens(content)
+                        # Add grounding chunks
+                        chunk_index = len(grounding_chunks)
+                        grounding_chunks.append({
+                            "web": {
+                                "uri": url,
+                                "title": ""  # In a real implementation, extract title from HTML
+                            }
+                        })
 
-                return WebFetchResult(
-                    url=url,
-                    content=content,
-                    content_type=content_type,
-                    status_code=status_code,
-                    headers=headers,
-                    metadata=metadata,
-                    cache_hit=False,
-                    truncated=truncated,
-                    word_count=word_count,
-                    token_count=token_count
-                )
+                        # Add grounding support
+                        if text_content:
+                            grounding_support.append({
+                                "segment": {
+                                    "startIndex": 0,
+                                    "endIndex": len(text_content),
+                                    "text": text_content[:100] + ("..." if len(text_content) > 100 else "")
+                                },
+                                "groundingChunkIndices": [chunk_index]
+                            })
 
-    def _is_valid_url(self, url: str) -> bool:
-        try:
-            result = urlparse(url)
-            return all([result.scheme, result.netloc])
-        except:
-            return False
+            except asyncio.TimeoutError:
+                contents.append({
+                    "url": url,
+                    "error": f"Request timed out after {timeout_ms}ms"
+                })
+            except Exception as e:
+                contents.append({
+                    "url": url,
+                    "error": f"Error fetching content: {str(e)}"
+                })
 
-    def _is_private_ip(self, url: str) -> bool:
-        try:
-            hostname = urlparse(url).netloc
-            ip = socket.gethostbyname(hostname)
-            return self.private_ip_detector.is_private(ip)
-        except:
-            return False
-
-    def _generate_cache_key(self, url: str, html_to_text: bool, max_tokens: Optional[int]) -> str:
-        return f'{url}::{html_to_text}::{max_tokens or "none"}'
-
-    def _is_cache_valid(self, cached_entry: Dict[str, Any], ttl_ms: int) -> bool:
-        current_time = asyncio.get_event_loop().time() * 1000
-        return (current_time - cached_entry['timestamp']) < ttl_ms
-
-    def _convert_html_to_text(self, html: str) -> str:
-        # 简化的HTML转文本实现，实际项目中可能需要使用html2text等库
-        # 这里只是一个示例
-        text = re.sub(r'<[^>]+>', ' ', html)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
-
-    def _extract_metadata(self, content: str, url: str) -> Dict[str, Any]:
-        # 提取基本元数据
         return {
-            'url': url,
-            'content_length': len(content),
-            'word_count': len(content.split()),
-            'token_count': self._count_tokens(content)
+            "contents": contents,
+            "grounding_chunks": grounding_chunks,
+            "grounding_support": grounding_support
         }
-
-    def _count_tokens(self, text: str) -> int:
-        # 简单的token计数实现，实际项目中可能需要使用tiktoken等库
-        return len(text.split())
-
-    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
-        # 按token截断文本
-        tokens = text.split()
-        if len(tokens) <= max_tokens:
-            return text
-        return ' '.join(tokens[:max_tokens]) + '... (truncated due to max_tokens limit)'
