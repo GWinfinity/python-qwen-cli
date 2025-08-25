@@ -57,11 +57,17 @@ TOOL_CALL_LOOP_THRESHOLD = 5
 CONTENT_LOOP_THRESHOLD = 10
 CONTENT_CHUNK_SIZE = 50
 MAX_HISTORY_LENGTH = 1000
+# 当请求LLM检查循环时，要包含在历史记录中的最近对话轮次数量
 LLM_LOOP_CHECK_HISTORY_COUNT = 20
+# 在基于LLM的循环检查被激活之前，单个提示中必须经过的轮次数量。
 LLM_CHECK_AFTER_TURNS = 30
+# 执行基于LLM的循环检查的默认间隔（以轮次数量计）。此值会根据LLM的置信度动态调整。
 DEFAULT_LLM_CHECK_INTERVAL = 3
+# 基于LLM的循环检查的最小间隔。当循环置信度高时使用，以便更频繁地检查。
 MIN_LLM_CHECK_INTERVAL = 5
+# 基于LLM的循环检查的最大间隔。当循环置信度低时使用，以便减少检查频率。
 MAX_LLM_CHECK_INTERVAL = 15
+# 用于检测和防止AI响应中无限循环的服务。监控工具调用重复和内容句子重复。
 DEFAULT_GEMINI_FLASH_MODEL = "gemini-flash"
 
 class LoopDetectionService:
