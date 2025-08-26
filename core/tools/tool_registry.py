@@ -298,11 +298,11 @@ def _sanitize_parameters(schema: Optional[Dict[str, Any]], visited: Set[Dict[str
     # Handle enum values
     if 'enum' in schema and isinstance(schema['enum'], list):
         # Ensure type is string for enum
-        schema['type'] = 'string'
+        schema['type'] = Type.STRING
         # Filter out null and undefined, convert to strings
         schema['enum'] = [str(value) for value in schema['enum'] if value is not None]
 
     # Handle string formats
-    if schema.get('type') == 'string':
+    if schema.get('type') == Type.STRING:
         if 'format' in schema and schema['format'] not in ['enum', 'date-time']:
             schema.pop('format')
