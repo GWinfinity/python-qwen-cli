@@ -7,6 +7,18 @@ from ..utils.editor import EditorType, open_diff
 from ..utils.errors import is_node_error
 from ..tool.tool import Tool
 
+
+class ModifiableTool(Tool[toolParams], Protocol[toolParams]):
+    def get_modify_context(self, abort_signal: Future) -> ModifyContext[toolParams]:
+        """获取修改上下文
+        
+        Args:
+            abort_signal: 用于取消操作的信号
+        
+        Returns:
+            修改上下文对象
+        """
+        pass
 # 定义 ModifiableTool 接口
 def is_modifiable_tool(tool: Tool[ToolParams]) -> bool:
     """检查工具是否实现了 ModifiableTool 接口"""
