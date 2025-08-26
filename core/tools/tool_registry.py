@@ -7,15 +7,13 @@ import subprocess
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 
-from ..config import Config,BaseTool, ToolResult, Icon
-from ..utils.logger import Logger
-from ..utils.shell_quote import shell_quote
-from .schema_validator import SchemaValidator
+from ..config import Config
+from ..tools.tool import Tool, ToolResult, BaseTool, Icon
 from google.genai.types import FunctionDeclaration,Schema,Type
+from .mcp_client import discovery_mcp_tools
+from .mcp_tool import discovered_mcp_tool 
 
-
-
-class DiscoveredTool:
+class DiscoveredTool(BaseTool):
     def __init__(self,
                  config:Config,
                  name: str,
@@ -182,6 +180,12 @@ class ToolRegistry:
             if not cmd_parts:
                 raise ValueError("Tool discovery command is empty or contains only whitespace.")
 
+
+            # 设置输出大小限制（10MB）
+            MAX_STDOUT_SIZE = 10 * 1024 * 1024
+            MAX_STDERR_SIZE = 10 * 1024 * 1024
+            size_limit_exceeded = False
+
             process = await asyncio.create_subprocess_exec(
                 cmd_parts[0],
                 *cmd_parts[1:],
@@ -189,51 +193,50 @@ class ToolRegistry:
                 stderr=subprocess.PIPE
             )
 
-            stdout, stderr = await process.communicate()
-            stdout_str = stdout.decode() if stdout else ""
-            stderr_str = stderr.decode() if stderr else ""
+            stdout_bytes = bytearray()
+            stderr_bytes = bytearray()
 
-            if process.returncode != 0:
-                print(f"Command failed with code {process.returncode}")
-                print(stderr_str)
-                raise ValueError(f"Tool discovery command failed with exit code {process.returncode}")
+                    # 读取标准输出和标准错误
+            async def read_stdout():
+                nonlocal size_limit_exceeded
+                while True:
+                    chunk = await process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    if len(stdout_bytes) + len(chunk) > MAX_STDOUT_SIZE:
+                        size_limit_exceeded = True
+                        process.terminate()
+                        break
+                    stdout_bytes.extend(chunk)
 
-            # Parse the output
-            discovered_items = json.loads(stdout_str.strip())
+            async def read_stderr():
+                nonlocal size_limit_exceeded
+                while True:
+                    chunk = await process.stderr.read(4096)
+                    if not chunk:
+                        break
+                    if len(stderr_bytes) + len(chunk) > MAX_STDERR_SIZE:
+                        size_limit_exceeded = True
+                        process.terminate()
+                        break
+                    stderr_bytes.extend(chunk)
 
-            if not discovered_items or not isinstance(discovered_items, list):
-                raise ValueError("Tool discovery command did not return a JSON array of tools.")
+                    await asyncio.gather(read_stdout(), read_stderr())
+            # 等待进程结束
+            return_code = await process.wait()
 
-            functions = []
-            for tool in discovered_items:
-                if tool and isinstance(tool, dict):
-                    if 'function_declarations' in tool and isinstance(tool['function_declarations'], list):
-                        functions.extend(tool['function_declarations'])
-                    elif 'functionDeclarations' in tool and isinstance(tool['functionDeclarations'], list):
-                        functions.extend(tool['functionDeclarations'])
-                    elif 'name' in tool:
-                        functions.append(tool)
+            # 解码输出
+            stdout = stdout_bytes.decode('utf-8', errors='replace')
+            stderr = stderr_bytes.decode('utf-8', errors='replace')
 
-            # Register each function as a tool
-            for func in functions:
-                if not func.get('name'):
-                    print("Warning: Discovered a tool with no name. Skipping.")
-                    continue
+            if size_limit_exceeded:
+                raise ValueError(f'Tool discovery command output exceeded size limit of {MAX_STDOUT_SIZE} bytes.')
 
-                # Sanitize parameters
-                parameters = func.get('parameters', {})
-                if not isinstance(parameters, dict):
-                    parameters = {}
-                sanitize_parameters(parameters)
+            if return_code != 0:
+                print(f'Command failed with code {return_code}', file=sys.stderr)
+                print(stderr, file=sys.stderr)
+                raise ValueError(f'Tool discovery command failed with exit code {return_code}')
 
-                self.register_tool(
-                    DiscoveredTool(
-                        self.config,
-                        func['name'],
-                        func.get('description', ''),
-                        parameters,
-                    )
-                )
 
         except Exception as e:
             print(f"Tool discovery command '{discovery_cmd}' failed: {e}")
