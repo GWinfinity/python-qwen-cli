@@ -4,69 +4,38 @@ from enum import Enum
 from typing import Dict, List, Optional, Callable, Any, Set, Tuple, Protocol, Union
 import os
 import json
+import shlex
 from urllib.parse import urlparse
+from contextlib import AsyncExitStack
 
 # 模拟导入，实际项目中需要替换为真实的导入
 from mcp.client import Client
 from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
 from mcp.client.streamable_http import StreamableHTTPTransport
 from mcp.types import Prompt, ListPromptsResult,GetPromptRequest,GetPromptRequestParams
 
+from ..config.config import AuthProviderType,MCPServerConfig
+from ..mcp.google_auth_provider import GoogleCredentialProvider
+from ..mcp.oauth_provider import OAuthUtils
+from ..mcp.oauth_token_storage import MCPOAuthTokenStorage
+from mcp_tool import DiscoveredMCPTool
+from google.genai.types import FunctionDeclaration
+from tool_registry import ToolRegistry
+from ..prompt.prompt_registry import PromptRegistry
+from ..utils.errors import get_error_message
 
-# TODO: 定义MCP客户端的配置选项
-# js-mcp 包有很多 *Transport 接口和 Options 类型需要转化适配Python，明天继续。
+
+
+# 20250826 js-mcp 包有很多 *Transport 接口和 Options 类型需要转化适配Python，明天继续
+# 20250827 完善一些调用，需要补充的内容好多，鉴于SSE协议官方已弃用，对于这一部分做直接返回None 处理
+
 
 # 常量定义
 def get_error_message(error: Exception) -> str:
     """获取异常的错误消息"""
     return str(error)
 
-# 假设的类型定义，实际项目中需要替换为真实的类型
-class Client:
-    """MCP客户端类"""
-    def __init__(self, config: Dict[str, Any]):
-        self.name = config.get('name')
-        self.version = config.get('version')
-        self._onerror = None
-        self._call_tool = None
-    
-    @property
-    def onerror(self) -> Optional[Callable[[Exception], None]]:
-        return self._onerror
-    
-    @onerror.setter
-    def onerror(self, callback: Optional[Callable[[Exception], None]]) -> None:
-        self._onerror = callback
-    
-    async def connect(self, transport: Any, options: Dict[str, Any]) -> None:
-        """连接到MCP服务器"""
-        pass
-    
-    def close(self) -> None:
-        """关闭连接"""
-        pass
-    
-    async def request(self, params: Dict[str, Any], schema: Any = None) -> Any:
-        """发送请求到MCP服务器"""
-        pass
 
-class MCPServerConfig:
-    """MCP服务器配置"""
-    def __init__(self, **kwargs):
-        self.http_url: Optional[str] = kwargs.get('httpUrl')
-        self.url: Optional[str] = kwargs.get('url')
-        self.command: Optional[str] = kwargs.get('command')
-        self.args: Optional[List[str]] = kwargs.get('args')
-        self.env: Optional[Dict[str, str]] = kwargs.get('env')
-        self.cwd: Optional[str] = kwargs.get('cwd')
-        self.headers: Optional[Dict[str, str]] = kwargs.get('headers')
-        self.timeout: Optional[int] = kwargs.get('timeout')
-        self.trust: Optional[bool] = kwargs.get('trust')
-        self.oauth: Optional[Dict[str, Any]] = kwargs.get('oauth')
-        self.auth_provider_type: Optional[str] = kwargs.get('authProviderType')
-        self.include_tools: Optional[List[str]] = kwargs.get('includeTools')
-        self.exclude_tools: Optional[List[str]] = kwargs.get('excludeTools')
 
 class ToolRegistry:
     """工具注册表"""
@@ -378,7 +347,7 @@ def populate_mcp_server_command(
         cmd = mcp_server_command
         # 这里应该使用shell_quote.parse来解析命令
         # 但为了简单起见，我们使用split作为模拟
-        args = cmd.split()
+        args = shlex.split(cmd)
         # 使用通用服务器名称'mcp'
         mcp_servers['mcp'] = MCPServerConfig(
             command=args[0],
@@ -641,7 +610,7 @@ async def connect_to_mcp_server(
             return mcp_client
         except Exception as error:
             # 这里应该调用transport.close()
-            # await transport.close()
+            await transport.close()
             raise error
     except Exception as error:
         # 检查这是否是可能表明需要OAuth的401错误
@@ -922,10 +891,10 @@ async def create_transport(
         }
         if mcp_server_config.http_url:
             # 这里应该返回StreamableHTTPClientTransport的实例
-            # return StreamableHTTPClientTransport(
-            #     urlparse(mcp_server_config.http_url),
-            #     transport_options,
-            # )
+            return StreamableHTTPClientTransport(
+                 urlparse(mcp_server_config.http_url),
+                 transport_options,
+            )
             return None
         elif mcp_server_config.url:
             # 这里应该返回SSEClientTransport的实例
