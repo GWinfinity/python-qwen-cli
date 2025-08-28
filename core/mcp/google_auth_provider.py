@@ -5,7 +5,7 @@ from google.oauth2 import service_account
 from google.auth import default
 from google.auth.transport.requests import Request
 from typing import Optional, Dict, List, Any
-from mcp.client.auth import OAuthClientProvider
+#from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import OAuthClientMetadata,OAuthClientInformationFull,OAuthToken
 from ..config.config import MCPServerConfig
 
@@ -87,7 +87,7 @@ class GoogleCredentialProvider:
         """
         self._client_information = client_information
     
-    async def tokens(self) -> Optional[OAuthTokens]:
+    async def tokens(self) -> Optional[OAuthToken]:
         """获取 OAuth 令牌
         
         Returns:
@@ -102,7 +102,7 @@ class GoogleCredentialProvider:
                 print('Failed to get access token from Google ADC')
                 return None
             
-            tokens: OAuthTokens = {
+            tokens: OAuthToken = {
                 'access_token': access_token,
                 'token_type': 'Bearer',
             }
@@ -111,7 +111,7 @@ class GoogleCredentialProvider:
             print(f"Error getting tokens: {e}")
             return None
     
-    def save_tokens(self, tokens: OAuthTokens) -> None:
+    def save_tokens(self, tokens: OAuthToken) -> None:
         """保存令牌（在 ADC 模式下为空操作）
         
         Args:
