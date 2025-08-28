@@ -7,9 +7,7 @@ from google.auth.transport.requests import Request
 from typing import Optional, Dict, List, Any
 from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import OAuthClientMetadata,OAuthClientInformationFull,OAuthToken
-# 定义接口需要的类型
-typing.OAuthClientInformation = Dict[str, Any]
-typing.MCPServerConfig = Dict[str, Any]
+from ..config.config import MCPServerConfig
 
 class OAuthClientInformation(TypedDict, total=False):
     """OAuth 客户端信息结构定义
