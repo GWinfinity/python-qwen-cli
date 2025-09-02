@@ -6,7 +6,7 @@ from enum import Enum
 from datetime import datetime
 
 from core.core.core_tool_scheduler import ToolCall
-from turn import ToolCallRequestInfo, ToolCallResponseInfo
+from turn import PartListUnion, ToolCallRequestInfo, ToolCallResponseInfo
 from ..tools.tools import ToolConfirmationPayload,ToolCallConfirmationDetails,Tool, ToolResult,ToolResultDisplay
 from ..tools.tool_registry import ToolRegistry
 from ..tools.tool_error import ToolErrorType
@@ -16,8 +16,7 @@ from ..telemetry.types import ToolCallEvent
 from ..utils.generate_content_response_utilities import get_response_text_from_parts
 from ..utils.editor import EditorType
 from ..tools.modifiable_tool import is_modifiable_tool, ModifyContext, modify_with_editor
-from google.genai.types import Part,PartUnion
-
+from google.genai.types import Part
 # 第三方库
 from diff import create_patch  # 假设使用类似的Python diff库
 
@@ -112,7 +111,7 @@ AllToolCallsCompleteHandler = Callable[[List[CompletedToolCall]], None]
 ToolCallsUpdateHandler = Callable[[List[ToolCall]], None]
 
 Status = ToolCall['status']
-def create_function_response_part(call_id: str, tool_name: str, output: str) -> Dict[str, Any]:
+def create_function_response_part(call_id: str, tool_name: str, output: str) -> Part:
     """Formats tool output for a Gemini FunctionResponse."""
     return {
         'functionResponse': {
@@ -123,7 +122,7 @@ def create_function_response_part(call_id: str, tool_name: str, output: str) -> 
     }
 
 
-def convert_to_function_response(tool_name: str, call_id: str, llm_content: Any) -> Any:
+def convert_to_function_response(tool_name: str, call_id: str, llm_content: PartListUnion) -> PartListUnion:
     content_to_process = llm_content[0] if isinstance(llm_content, list) and len(llm_content) == 1 else llm_content
 
     if isinstance(content_to_process, str):
@@ -180,6 +179,21 @@ def create_error_response(
         'errorType': error_type
     }
 
+class CoreToolSchedulerOptions:
+    def __init__(self,
+        tool_registry: ToolRegistry,
+        output_update_handler: Optional[OutputUpdateHandler],
+        on_all_tool_calls_complete: Optional[AllToolCallsCompleteHandler] ,
+        on_tool_calls_update: Optional[ToolCallsUpdateHandler],
+        get_preferred_editor: Callable[[], Optional[EditorType]],
+        config: Config):
+        self.tool_registry = tool_registry
+        self.output_update_handler = output_update_handler
+        self.on_all_tool_calls_complete = on_all_tool_calls_complete
+        self.on_tool_calls_update = on_tool_calls_update
+        self.get_preferred_editor = get_preferred_editor
+        self.config = config
+
 
 class CoreToolScheduler:
     def __init__(
@@ -198,7 +212,7 @@ class CoreToolScheduler:
         self.get_preferred_editor = get_preferred_editor
         self.config = config
 
-    def set_status_internal(
+    def __set_status_internal(
         self,
         target_call_id: str,
         new_status: ToolCallStatus,
@@ -321,10 +335,10 @@ class CoreToolScheduler:
                 updated_tool_calls.append(current_call)
 
         self.tool_calls = updated_tool_calls
-        self.notify_tool_calls_update()
-        self.check_and_notify_completion()
+        self.__notify_tool_calls_update()
+        self.__check_and_notify_completion()
 
-    def set_args_internal(self, target_call_id: str, args: Dict[str, Any]) -> None:
+    def __set_args_internal(self, target_call_id: str, args: Dict[str, Any]) -> None:
         self.tool_calls = [
             {
                 **call,
@@ -333,7 +347,7 @@ class CoreToolScheduler:
             for call in self.tool_calls
         ]
 
-    def is_running(self) -> bool:
+    def __is_running(self) -> bool:
         return any(
             call.status == ToolCallStatus.EXECUTING or call.status == ToolCallStatus.AWAITING_APPROVAL
             for call in self.tool_calls
@@ -344,7 +358,7 @@ class CoreToolScheduler:
         request: Union[ToolCallRequestInfo, List[ToolCallRequestInfo]],
         signal: asyncio.Event
     ) -> None:
-        if self.is_running():
+        if self.__is_running():
             raise Exception(
                 'Cannot schedule new tool calls while other tool calls are actively running (executing or awaiting approval).'
             )
@@ -354,7 +368,7 @@ class CoreToolScheduler:
 
         new_tool_calls: List[ToolCall] = []
         for req_info in requests_to_process:
-            tool_instance = tool_registry.getTool(req_info['name'])
+            tool_instance = tool_registry.get_tool(req_info['name'])
             if not tool_instance:
                 error_call = ErroredToolCall(
                     req_info,
@@ -372,7 +386,7 @@ class CoreToolScheduler:
                 new_tool_calls.append(validating_call)
 
         self.tool_calls.extend(new_tool_calls)
-        self.notify_tool_calls_update()
+        self.__notify_tool_calls_update()
 
         for tool_call in new_tool_calls:
             if tool_call.status != ToolCallStatus.VALIDATING:
@@ -382,7 +396,7 @@ class CoreToolScheduler:
             tool_instance = tool_call.tool
             try:
                 if self.config.getApprovalMode() == ApprovalMode.YOLO:
-                    self.set_status_internal(req_info['callId'], ToolCallStatus.SCHEDULED)
+                    self.__set_status_internal(req_info['callId'], ToolCallStatus.SCHEDULED)
                 else:
                     confirmation_details = await tool_instance.shouldConfirmExecute(
                         req_info['args'],
@@ -409,15 +423,15 @@ class CoreToolScheduler:
                             **confirmation_details,
                             'onConfirm': wrapped_on_confirm
                         }
-                        self.set_status_internal(
+                        self.__set_status_internal(
                             req_info['callId'],
                             ToolCallStatus.AWAITING_APPROVAL,
                             wrapped_confirmation_details
                         )
                     else:
-                        self.set_status_internal(req_info['callId'], ToolCallStatus.SCHEDULED)
+                        self.__set_status_internal(req_info['callId'], ToolCallStatus.SCHEDULED)
             except Exception as error:
-                self.set_status_internal(
+                self.__set_status_internal(
                     req_info['callId'],
                     ToolCallStatus.ERROR,
                     create_error_response(
@@ -427,8 +441,8 @@ class CoreToolScheduler:
                     )
                 )
 
-        self.attempt_execution_of_scheduled_calls(signal)
-        self.check_and_notify_completion()
+        self.__attempt_execution_of_scheduled_calls(signal)
+        self.__check_and_notify_completion()
 
     async def handle_confirmation_response(
         self,
@@ -453,19 +467,19 @@ class CoreToolScheduler:
                 break
 
         if outcome == ToolConfirmationOutcome.Cancel or signal.is_set():
-            self.set_status_internal(
+            self.__set_status_internal(
                 call_id,
                 ToolCallStatus.CANCELLED,
                 'User did not allow tool call'
             )
         elif outcome == ToolConfirmationOutcome.ModifyWithEditor:
-            if tool_call and isModifiableTool(tool_call.tool):
+            if tool_call and is_modifiable_tool(tool_call.tool):
                 modify_context = tool_call.tool.getModifyContext(signal)
                 editor_type = self.get_preferred_editor()
                 if not editor_type:
                     return
 
-                self.set_status_internal(
+                self.__set_status_internal(
                     call_id,
                     ToolCallStatus.AWAITING_APPROVAL,
                     {
@@ -480,8 +494,8 @@ class CoreToolScheduler:
                     editor_type,
                     signal
                 )
-                self.set_args_internal(call_id, updated_params)
-                self.set_status_internal(
+                self.__set_args_internal(call_id, updated_params)
+                self.__set_status_internal(
                     call_id,
                     ToolCallStatus.AWAITING_APPROVAL,
                     {
@@ -493,16 +507,16 @@ class CoreToolScheduler:
         else:
             # If the client provided new content, apply it before scheduling.
             if payload and payload.get('newContent') and tool_call:
-                await self._apply_inline_modify(
+                await self.__apply_inline_modify(
                     tool_call,
                     payload,
                     signal
                 )
-            self.set_status_internal(call_id, ToolCallStatus.SCHEDULED)
+            self.__set_status_internal(call_id, ToolCallStatus.SCHEDULED)
 
-        self.attempt_execution_of_scheduled_calls(signal)
+        self.__attempt_execution_of_scheduled_calls(signal)
 
-    async def _apply_inline_modify(
+    async def __apply_inline_modify(
         self,
         tool_call: WaitingToolCall,
         payload: ToolConfirmationPayload,
@@ -510,7 +524,7 @@ class CoreToolScheduler:
     ) -> None:
         if (
             tool_call.confirmation_details.get('type') != 'edit' or
-            not isModifiableTool(tool_call.tool)
+            not is_modifiable_tool(tool_call.tool)
         ):
             return
 
@@ -532,8 +546,8 @@ class CoreToolScheduler:
             'Proposed'
         )
 
-        self.set_args_internal(tool_call.request['callId'], updated_params)
-        self.set_status_internal(
+        self.__set_args_internal(tool_call.request['callId'], updated_params)
+        self.__set_status_internal(
             tool_call.request['callId'],
             ToolCallStatus.AWAITING_APPROVAL,
             {
@@ -542,7 +556,7 @@ class CoreToolScheduler:
             }
         )
 
-    def attempt_execution_of_scheduled_calls(self, signal: asyncio.Event) -> None:
+    def __attempt_execution_of_scheduled_calls(self, signal: asyncio.Event) -> None:
         all_calls_final_or_scheduled = all(
             call.status in [
                 ToolCallStatus.SCHEDULED,
@@ -564,7 +578,7 @@ class CoreToolScheduler:
 
                 call_id = tool_call.request['callId']
                 tool_name = tool_call.request['name']
-                self.set_status_internal(call_id, ToolCallStatus.EXECUTING)
+                self.__set_status_internal(call_id, ToolCallStatus.EXECUTING)
 
                 live_output_callback = None
                 if tool_call.tool.canUpdateOutput and self.output_update_handler:
@@ -576,7 +590,7 @@ class CoreToolScheduler:
                             if tc.request['callId'] == call_id and tc.status == ToolCallStatus.EXECUTING:
                                 self.tool_calls[i].live_output = output_chunk
                                 break
-                        self.notify_tool_calls_update()
+                        self.__notify_tool_calls_update()
 
                     live_output_callback = callback
 
@@ -590,7 +604,7 @@ class CoreToolScheduler:
                         )
 
                         if signal.is_set():
-                            self.set_status_internal(
+                            self.__set_status_internal(
                                 call_id,
                                 ToolCallStatus.CANCELLED,
                                 'User cancelled tool execution.'
@@ -610,7 +624,7 @@ class CoreToolScheduler:
                                 'error': None,
                                 'errorType': None
                             }
-                            self.set_status_internal(call_id, ToolCallStatus.SUCCESS, success_response)
+                            self.__set_status_internal(call_id, ToolCallStatus.SUCCESS, success_response)
                         else:
                             # It is a failure
                             error = Exception(tool_result['error']['message'])
@@ -619,9 +633,9 @@ class CoreToolScheduler:
                                 error,
                                 tool_result['error']['type']
                             )
-                            self.set_status_internal(call_id, ToolCallStatus.ERROR, error_response)
+                            self.__set_status_internal(call_id, ToolCallStatus.ERROR, error_response)
                     except Exception as execution_error:
-                        self.set_status_internal(
+                        self.__set_status_internal(
                             call_id,
                             ToolCallStatus.ERROR,
                             create_error_response(
@@ -634,7 +648,7 @@ class CoreToolScheduler:
                 # Start execution
                 asyncio.create_task(execute_tool())
 
-    def check_and_notify_completion(self) -> None:
+    def __check_and_notify_completion(self) -> None:
         all_calls_are_terminal = all(
             call.status in [
                 ToolCallStatus.SUCCESS,
@@ -653,8 +667,8 @@ class CoreToolScheduler:
 
             if self.on_all_tool_calls_complete:
                 self.on_all_tool_calls_complete(completed_calls)
-            self.notify_tool_calls_update()
+            self.__notify_tool_calls_update()
 
-    def notify_tool_calls_update(self) -> None:
+    def __notify_tool_calls_update(self) -> None:
         if self.on_tool_calls_update:
             self.on_tool_calls_update(self.tool_calls.copy())

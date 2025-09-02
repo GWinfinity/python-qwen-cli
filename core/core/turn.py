@@ -12,7 +12,7 @@ from ..utils.error_reporting import report_error
 from ..utils.errors import get_error_message, UnauthorizedError, to_friendly_error
 from .gemini_chat import GeminiChat
 
-type PartListUnion = Union[List[PartUnion], PartUnion]
+type PartListUnion = List[PartUnion]
 
 # 定义服务器工具结构
 class ServerTool(Protocol):
