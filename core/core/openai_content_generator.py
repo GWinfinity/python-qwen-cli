@@ -169,7 +169,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     检查错误是否为超时错误
     """
-    def is_timeout_error(self, error: Any) -> bool:
+    def __is_timeout_error(self, error: Any) -> bool:
         if not error:
             return False
 
@@ -200,7 +200,7 @@ class OpenAIContentGenerator(ContentGenerator):
         user_prompt_id: str
     ) -> GoogleGenerateContentResponse:
         start_time = datetime.now()
-        messages = self.convert_to_openai_format(request)
+        messages = self.__convert_to_openai_format(request)
 
         try:
             # 构建采样参数，优先级明确：
@@ -220,13 +220,13 @@ class OpenAIContentGenerator(ContentGenerator):
             }
 
             if request.get("config") and request["config"].get("tools"):
-                create_params["tools"] = await self.convert_gemini_tools_to_openai(
+                create_params["tools"] = await self.__convert_gemini_tools_to_openai(
                     request["config"]["tools"]
                 )
 
             completion = await self._client.chat.completions.create(**create_params)
 
-            response = self.convert_to_gemini_format(completion)
+            response = self.__convert_to_gemini_format(completion)
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             # 记录API响应事件用于UI遥测
@@ -242,8 +242,8 @@ class OpenAIContentGenerator(ContentGenerator):
 
             # 如果启用，则记录交互
             if self.__config.get_content_generator_config() and self.__config.get_content_generator_config().enable_openai_logging:
-                openai_request = await self.convert_gemini_request_to_openai(request)
-                openai_response = self.convert_gemini_response_to_openai(response)
+                openai_request = await self.__convert_gemini_request_to_openai(request)
+                openai_response = self.__convert_gemini_response_to_openai(response)
                 await openai_logger.log_interaction(openai_request, openai_response)
 
             return response
@@ -252,7 +252,7 @@ class OpenAIContentGenerator(ContentGenerator):
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             # 特别识别超时错误
-            is_timeout_error = self.is_timeout_error(error)
+            is_timeout_error = self.__is_timeout_error(error)
             error_message = f"请求在{round(duration_ms / 1000)}秒后超时。尝试减少输入长度或增加配置中的超时时间。" if is_timeout_error else str(error)
             
 
@@ -294,7 +294,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
             # 如果启用，则记录错误交互
             if self.__config.get_content_generator_config() and self.__config.get_content_generator_config().enable_openai_logging:
-                openai_request = await self.convert_gemini_request_to_openai(request)
+                openai_request = await self.__convert_gemini_request_to_openai(request)
                 await openai_logger.log_interaction(
                     openai_request,
                     None,
@@ -323,7 +323,7 @@ class OpenAIContentGenerator(ContentGenerator):
         user_prompt_id: str
     ) -> AsyncGenerator[GoogleGenerateContentResponse, None]:
         start_time = datetime.now()
-        messages = self.convert_to_openai_format(request)
+        messages = self.__convert_to_openai_format(request)
 
         try:
             # 构建采样参数，优先级明确
@@ -342,13 +342,13 @@ class OpenAIContentGenerator(ContentGenerator):
             }
 
             if request.config and request.config.tools:
-                create_params['tools'] = await self.convert_gemini_tools_to_openai(
+                create_params['tools'] = await self.__convert_gemini_tools_to_openai(
                     request.config.tools
                 )
 
             stream = await self._client.chat.completions.create(**create_params)
 
-            original_stream = self.stream_generator(stream)
+            original_stream = self.__stream_generator(stream)
 
             # 收集所有响应用于最终日志记录（不要在流式传输期间记录）
             responses: List[GoogleGenerateContentResponse] = []
@@ -382,17 +382,17 @@ class OpenAIContentGenerator(ContentGenerator):
 
                     # 如果启用，则记录交互（与generateContent方法相同）
                     if self.__config.get_content_generator_config() and self.__config.get_content_generator_config().enable_openai_logging:
-                        openai_request = await self.convert_gemini_request_to_openai(request)
+                        openai_request = await self.__convert_gemini_request_to_openai(request)
                         # 对于流式传输，我们将所有响应合并为一个响应进行记录
-                        combined_response = self.combine_stream_responses_for_logging(responses)
-                        openai_response = self.convert_gemini_response_to_openai(combined_response)
+                        combined_response = self.__combine_stream_responses_for_logging(responses)
+                        openai_response = self.__convert_gemini_response_to_openai(combined_response)
                         await openai_logger.log_interaction(openai_request, openai_response)
 
                 except Exception as error:
                     duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
                     # 特别识别流式传输的超时错误
-                    is_timeout_error = self.is_timeout_error(error)
+                    is_timeout_error = self.__is_timeout_error(error)
                     error_message = f"流式请求在{round(duration_ms / 1000)}秒后超时。尝试减少输入长度或增加配置中的超时时间。" if is_timeout_error else str(error)
 
                     # 即使在流式传输中出现错误，也要估计token使用量
@@ -431,7 +431,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
                     # 如果启用，则记录错误交互
                     if self.__config.get_content_generator_config() and self.__config.get_content_generator_config().enable_openai_logging:
-                        openai_request = await self.convert_gemini_request_to_openai(request)
+                        openai_request = await self.__convert_gemini_request_to_openai(request)
                         await openai_logger.log_interaction(
                             openai_request,
                             None,
@@ -458,7 +458,7 @@ class OpenAIContentGenerator(ContentGenerator):
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             # 特别识别流式设置的超时错误
-            is_timeout_error = self.is_timeout_error(error)
+            is_timeout_error = self.__is_timeout_error(error)
             error_message = f"流式设置在{round(duration_ms / 1000)}秒后超时。尝试减少输入长度或增加配置中的超时时间。" if is_timeout_error else str(error)
 
             # 即使在流式设置中出现错误，也要估计token使用量
@@ -511,7 +511,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
             raise
 
-    async def stream_generator(
+    async def __stream_generator(
         self, 
         stream: Any  # AsyncIterable[OpenAI.Chat.ChatCompletionChunk]
     ) -> AsyncGenerator[GoogleGenerateContentResponse, None]:
@@ -519,12 +519,12 @@ class OpenAIContentGenerator(ContentGenerator):
         self.streaming_tool_calls.clear()
 
         async for chunk in stream:
-            yield self.convert_stream_chunk_to_gemini_format(chunk)
+            yield self.__convert_stream_chunk_to_gemini_format(chunk)
 
     """
     合并流式响应用于日志记录目的
     """
-    def combine_stream_responses_for_logging(
+    def __combine_stream_responses_for_logging(
         self, 
         responses: List[GoogleGenerateContentResponse]
     ) -> GoogleGenerateContentResponse:
@@ -650,7 +650,7 @@ class OpenAIContentGenerator(ContentGenerator):
             print(f"OpenAI API嵌入错误: {error}")
             raise ValueError(f"OpenAI API错误: {str(error)}")
 
-    def convert_gemini_parameters_to_openai(
+    def __convert_gemini_parameters_to_openai(
         self, 
         parameters: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -699,7 +699,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         return convert_types(converted) if converted else None
 
-    async def convert_gemini_tools_to_openai(
+    async def __convert_gemini_tools_to_openai(
         self, 
         gemini_tools: ToolListUnion
     ) -> List[Dict[str, Any]]:
@@ -727,7 +727,7 @@ class OpenAIContentGenerator(ContentGenerator):
                             'function': {
                                 'name': func.name,
                                 'description': func.description,
-                                'parameters': self.convert_gemini_parameters_to_openai(
+                                'parameters': self.__convert_gemini_parameters_to_openai(
                                     getattr(func, 'parameters', {}) if hasattr(func, 'parameters') else {}
                                 ),
                             },
@@ -735,7 +735,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         return openai_tools
 
-    def convert_to_openai_format(
+    def __convert_to_openai_format(
         self, 
         request: GenerateContentParameters
     ) -> List[openai.types.CompletionCreateParams]: # OpenAI Chat ChatCompletionCreateParams
@@ -833,13 +833,13 @@ class OpenAIContentGenerator(ContentGenerator):
                 messages.append({'role': role, 'content': text})
 
         # 清理孤立的工具调用并合并连续的助手消息
-        cleaned_messages = self.clean_orphaned_tool_calls(messages)
-        return self.merge_consecutive_assistant_messages(cleaned_messages)
+        cleaned_messages = self.__clean_orphaned_tool_calls(messages)
+        return self.__merge_consecutive_assistant_messages(cleaned_messages)
 
     """
     清理消息历史中的孤立工具调用，以防止OpenAI API错误
     """
-    def clean_orphaned_tool_calls(
+    def __clean_orphaned_tool_calls(
         self, 
         messages: List[openai.types.CompletionCreateParams]
     ) -> List[openai.types.CompletionCreateParams]:
@@ -925,7 +925,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     合并连续的助手消息以组合分割的文本和工具调用
     """
-    def merge_consecutive_assistant_messages(
+    def __merge_consecutive_assistant_messages(
         self, 
         messages: List[openai.types.CompletionCreateParams]
     ) -> List[openai.types.CompletionCreateParams]:
@@ -963,7 +963,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         return merged
 
-    def convert_to_gemini_format(
+    def __convert_to_gemini_format(
         self, 
         openai_response: openai.types.chat.ChatCompletion  # OpenAI.Chat.ChatCompletion
     ) -> GoogleGenerateContentResponse:
@@ -1009,7 +1009,7 @@ class OpenAIContentGenerator(ContentGenerator):
                     'parts': parts,
                     'role': 'model',
                 },
-                'finishReason': self.map_finish_reason(choice.finish_reason or 'stop'),
+                'finishReason': self.__map_finish_reason(choice.finish_reason or 'stop'),
                 'index': 0,
                 'safetyRatings': [],
             },
@@ -1046,7 +1046,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         return response
 
-    def convert_stream_chunk_to_gemini_format(
+    def __convert_stream_chunk_to_gemini_format(
         self, 
         chunk: openai.types.chat.ChatCompletionChunk  # OpenAI.Chat.ChatCompletionChunk
 
@@ -1107,7 +1107,7 @@ class OpenAIContentGenerator(ContentGenerator):
                         'parts': parts,
                         'role': 'model',
                     },
-                    'finishReason': self.map_finish_reason(choice.finish_reason) if hasattr(choice, 'finish_reason') and choice.finish_reason else FinishReason.FINISH_REASON_UNSPECIFIED,
+                    'finishReason': self.__map_finish_reason(choice.finish_reason) if hasattr(choice, 'finish_reason') and choice.finish_reason else FinishReason.FINISH_REASON_UNSPECIFIED,
                     'index': 0,
                     'safetyRatings': [],
                 },
@@ -1203,7 +1203,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         return params
 
-    def map_finish_reason(self, openai_reason: Optional[str]) -> FinishReason:
+    def __map_finish_reason(self, openai_reason: Optional[str]) -> FinishReason:
         if not openai_reason:
             return FinishReason.FINISH_REASON_UNSPECIFIED
         mapping: Dict[str, FinishReason] = {
@@ -1218,7 +1218,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     将Gemini请求格式转换为OpenAI聊天完成格式用于日志记录
     """
-    async def convert_gemini_request_to_openai(
+    async def __convert_gemini_request_to_openai(
         self, 
         request: GenerateContentParameters
     ) -> OpenAIRequestFormat:
@@ -1315,8 +1315,8 @@ class OpenAIContentGenerator(ContentGenerator):
                 messages.append({'role': role, 'content': text})
 
         # 清理孤立的工具调用并合并连续的助手消息
-        cleaned_messages = self.clean_orphaned_tool_calls_for_logging(messages)
-        merged_messages = self.merge_consecutive_assistant_messages_for_logging(cleaned_messages)
+        cleaned_messages = self.__clean_orphaned_tool_calls_for_logging(messages)
+        merged_messages = self.__merge_consecutive_assistant_messages_for_logging(cleaned_messages)
 
         openai_request: Dict[str, Any] = {
             'model': self.__model,
@@ -1329,7 +1329,7 @@ class OpenAIContentGenerator(ContentGenerator):
 
         # 如果存在，转换工具
         if request.config and hasattr(request.config, 'tools') and request.config.tools:
-            openai_request['tools'] = await self.convert_gemini_tools_to_openai(
+            openai_request['tools'] = await self.__convert_gemini_tools_to_openai(
                 request.config.tools
             )
 
@@ -1338,7 +1338,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     清理用于日志记录的孤立工具调用
     """
-    def clean_orphaned_tool_calls_for_logging(
+    def __clean_orphaned_tool_calls_for_logging(
         self, 
         messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -1424,7 +1424,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     合并连续的助手消息以组合分割的文本和工具调用用于日志记录
     """
-    def merge_consecutive_assistant_messages_for_logging(
+    def __merge_consecutive_assistant_messages_for_logging(
         self, 
         messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -1465,7 +1465,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     将Gemini响应格式转换为OpenAI聊天完成格式用于日志记录
     """
-    def convert_gemini_response_to_openai(
+    def __convert_gemini_response_to_openai(
         self, 
         response: GoogleGenerateContentResponse
     ) -> Dict[str, Any]:
@@ -1499,7 +1499,7 @@ class OpenAIContentGenerator(ContentGenerator):
                 'role': 'assistant',
                 'content': message_content,
             },
-            'finish_reason': self.map_gemini_finish_reason_to_openai(
+            'finish_reason': self.__map_gemini_finish_reason_to_openai(
                 candidate.finishReason if candidate and hasattr(candidate, 'finishReason') else None
             ),
         }
@@ -1533,7 +1533,7 @@ class OpenAIContentGenerator(ContentGenerator):
     """
     将Gemini完成原因映射到OpenAI完成原因
     """
-    def map_gemini_finish_reason_to_openai(self, gemini_reason: Any) -> str:
+    def __map_gemini_finish_reason_to_openai(self, gemini_reason: Any) -> str:
         if not gemini_reason:
             return 'stop'
 
