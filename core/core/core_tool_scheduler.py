@@ -5,16 +5,18 @@ from typing import Dict, List, Union, Optional, Callable, Any, Tuple, TypeVar, G
 from enum import Enum
 from datetime import datetime
 
-# Python下需要重写
-#from ..index import (
-#    ToolCallRequestInfo, ToolCallResponseInfo, ToolConfirmationOutcome, Tool,
-#    ToolCallConfirmationDetails, ToolResult, ToolResultDisplay, ToolRegistry,
-#    ApprovalMode, EditorType,logToolCall, ToolCallEvent,
-#    ToolConfirmationPayload, ToolErrorType
-#)
-from ..config.config import Config
-from ..utils.generateContentResponseUtilities import getResponseTextFromParts
-from ..tools.modifiable_tool import isModifiableTool, ModifyContext, modifyWithEditor
+from core.core.core_tool_scheduler import ToolCall
+from turn import ToolCallRequestInfo, ToolCallResponseInfo
+from ..tools.tools import ToolConfirmationPayload,ToolCallConfirmationDetails,Tool, ToolResult,ToolResultDisplay
+from ..tools.tool_registry import ToolRegistry
+from ..tools.tool_error import ToolErrorType
+from ..config.config import ApprovalMode,Config
+from ..telemetry.loggers import log_tool_call
+from ..telemetry.types import ToolCallEvent
+from ..utils.generate_content_response_utilities import get_response_text_from_parts
+from ..utils.editor import EditorType
+from ..tools.modifiable_tool import is_modifiable_tool, ModifyContext, modify_with_editor
+from google.genai.types import Part,PartUnion
 
 # 第三方库
 from diff import create_patch  # 假设使用类似的Python diff库
@@ -109,7 +111,7 @@ OutputUpdateHandler = Callable[[str, str], None]
 AllToolCallsCompleteHandler = Callable[[List[CompletedToolCall]], None]
 ToolCallsUpdateHandler = Callable[[List[ToolCall]], None]
 
-
+Status = ToolCall['status']
 def create_function_response_part(call_id: str, tool_name: str, output: str) -> Dict[str, Any]:
     """Formats tool output for a Gemini FunctionResponse."""
     return {
