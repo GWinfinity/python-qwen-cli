@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Dict, Optional, Any, AsyncGenerator, TypeVar, Generic
 from google.genai import   CountTokensResponse,GenerateContentResponse,GenerateContentParameters,CountTokensParameters,EmbedContentResponse,EmbedContentParameters,GoogleGenAI
-from ..config import Config
+from ..config.config import Config
 from ..config.models import DEFAULT_GEMINI_MODEL
 from .model_check import get_effective_model
 from ..code_assist.code_assist import createCodeAssistContentGenerator
@@ -24,27 +24,27 @@ Interface abstracting the core functionalities for generating content and counti
 """
 class ContentGenerator(ABC):
     @abstractmethod
-    async def generateContent(
+    async def generate_content(
         self, request: GenerateContentParameters, userPromptId: str
     ) -> GenerateContentResponse:
         pass
 
     @abstractmethod
-    async def generateContentStream(
+    async def generate_content_stream(
         self, request: GenerateContentParameters, userPromptId: str
     ) -> AsyncGenerator[GenerateContentResponse, None]:
         pass
 
     @abstractmethod
-    async def countTokens(self, request: CountTokensParameters) -> CountTokensResponse:
+    async def count_tokens(self, request: CountTokensParameters) -> CountTokensResponse:
         pass
 
     @abstractmethod
-    async def embedContent(self, request: EmbedContentParameters) -> EmbedContentResponse:
+    async def embed_content(self, request: EmbedContentParameters) -> EmbedContentResponse:
         pass
 
     @property
-    def userTier(self) -> Optional[UserTierId]:
+    def user_tier(self) -> Optional[UserTierId]:
         return None
 
 class AuthType(Enum):
@@ -78,7 +78,7 @@ class ContentGeneratorConfig:
         self.samplingParams = samplingParams
         self.proxy = proxy
 
-async def createCodeAssistContentGenerator(
+async def create_code_assist_content_generator(
     httpOptions: Dict[str, Any],
     authType: AuthType,
     gcConfig: Config,
@@ -87,26 +87,26 @@ async def createCodeAssistContentGenerator(
     # 实现代码助手内容生成器
     # 这是一个模拟实现，实际实现需要根据原始 TypeScript 代码
     class CodeAssistContentGenerator(ContentGenerator):
-        async def generateContent(self, request: GenerateContentParameters, userPromptId: str) -> GenerateContentResponse:
+        async def generate_content(self, request: GenerateContentParameters, userPromptId: str) -> GenerateContentResponse:
             # 实现生成内容的逻辑
             return GenerateContentResponse()
 
-        async def generateContentStream(self, request: GenerateContentParameters, userPromptId: str) -> AsyncGenerator[GenerateContentResponse, None]:
+        async def generate_content_stream(self, request: GenerateContentParameters, userPromptId: str) -> AsyncGenerator[GenerateContentResponse, None]:
             # 实现流式生成内容的逻辑
             yield GenerateContentResponse()
 
-        async def countTokens(self, request: CountTokensParameters) -> CountTokensResponse:
+        async def count_tokens(self, request: CountTokensParameters) -> CountTokensResponse:
             # 实现计数 tokens 的逻辑
             return CountTokensResponse()
 
-        async def embedContent(self, request: EmbedContentParameters) -> EmbedContentResponse:
+        async def embed_content(self, request: EmbedContentParameters) -> EmbedContentResponse:
             # 实现嵌入内容的逻辑
             return EmbedContentResponse()
 
     return CodeAssistContentGenerator()
 
 
-def createContentGeneratorConfig(
+def create_content_generator_config(
     config: Config,
     authType: Optional[AuthType] = None,
 ) -> ContentGeneratorConfig:
@@ -160,12 +160,12 @@ def createContentGeneratorConfig(
         # 对于 Qwen OAuth，我们将在 createContentGenerator 中动态处理 API 密钥
         # 设置一个特殊标记表示这是 Qwen OAuth
         contentGeneratorConfig.apiKey = 'QWEN_OAUTH_DYNAMIC_TOKEN'
-        contentGeneratorConfig.model = config.getModel() or DEFAULT_GEMINI_MODEL
+        contentGeneratorConfig.model = config.get_model() or DEFAULT_GEMINI_MODEL
         return contentGeneratorConfig
 
     return contentGeneratorConfig
 
-async def createContentGenerator(
+async def create_content_generator(
     config: ContentGeneratorConfig,
     gcConfig: Config,
     sessionId: Optional[str] = None,
@@ -178,7 +178,7 @@ async def createContentGenerator(
     }
 
     if config.authType in (AuthType.LOGIN_WITH_GOOGLE, AuthType.CLOUD_SHELL):
-        return await createCodeAssistContentGenerator(
+        return await create_code_assist_content_generator(
             httpOptions,
             config.authType,
             gcConfig,
