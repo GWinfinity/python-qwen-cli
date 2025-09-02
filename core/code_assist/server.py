@@ -8,7 +8,7 @@ from aiohttp import ClientSession, ClientResponse
 from aiohttp.client_exceptions import ClientError
 
 # 假设这些类型已从types.ts转换
-from .types import (
+from core.code_assist.types import (
     CodeAssistGlobalUserSettingResponse,
     LoadCodeAssistRequest,
     LoadCodeAssistResponse,
@@ -27,7 +27,7 @@ from google.genai.types import (
     GenerateContentResponse
 )
 # 假设这些函数已从converter.ts转换
-from .converter import (
+from core.code_assist.converter import (
     CaCountTokenResponse,
     CaGenerateContentResponse,
     from_count_token_response,
@@ -36,7 +36,7 @@ from .converter import (
     to_generate_content_request
 )
 # 假设ContentGenerator已从contentGenerator.ts转换
-from ..core.content_generator import ContentGenerator
+from core.core.content_generator import ContentGenerator
 
 
 class HttpOptions:

@@ -275,7 +275,7 @@ sending the next message.
                     prompt_id,
                 )
 
-            response = await retryWithBackoff(apiCall, {
+            response = await retry_with_backoff(apiCall, {
                 "shouldRetry": lambda error: (
                     error and hasattr(error, 'message') and (
                         '429' in str(error.message) or 
@@ -370,7 +370,7 @@ sending the next message.
             # for transient issues internally before yielding the async generator, this retry will re-initiate
             # the stream. For simple 429/500 errors on initial call, this is fine.
             # If errors occur mid-stream, this setup won't resume the stream; it will restart it.
-            streamResponse = await retryWithBackoff(apiCall, {
+            streamResponse = await retry_with_backoff(apiCall, {
                 "shouldRetry": lambda error: (
                     error and hasattr(error, 'message') and (
                         '429' in str(error.message) or 
